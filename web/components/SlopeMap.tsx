@@ -117,8 +117,17 @@ export default function SlopeMap({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const maplibregl = (await import("maplibre-gl")).default;
+      // maplibre-gl 6 is pure ESM with named exports only; 5.x shipped a default export.
+      // Taking whichever shape is present keeps this working across the upgrade.
+      const mod = await import("maplibre-gl");
+      const maplibregl = ((mod as unknown as { default?: typeof mod }).default ?? mod);
       if (cancelled || !holder.current || mapRef.current) return;
+
+      // maplibre-gl 6 ships its worker as a separate .mjs and resolves it with
+      // `new URL(..., import.meta.url)`, which the static export does not emit. Serving
+      // the worker from /public and pointing MapLibre at it keeps tile parsing working.
+      (maplibregl as unknown as { setWorkerUrl?: (url: string) => void })
+        .setWorkerUrl?.("/maplibre-gl-worker.mjs");
 
       const map = new maplibregl.Map({
         container: holder.current,
@@ -343,7 +352,9 @@ export default function SlopeMap({
 
         readyRef.current = true;
         setReady(true);
-        map.fire("slopes-ready");
+        // v6 types `fire` against the known event union; arbitrary event names are still
+        // supported at runtime, which is what this component uses to signal readiness.
+        (map as unknown as { fire: (type: string) => void }).fire("slopes-ready");
 
       });
     })();
